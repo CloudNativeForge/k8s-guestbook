@@ -1,0 +1,7 @@
+name: guestbookapp_monitoring
+description: monitoring guestbook application
+runtime: nodejs
+config:
+  pulumi:tags:
+    value:
+      pulumi:template: kubernetes-typescript

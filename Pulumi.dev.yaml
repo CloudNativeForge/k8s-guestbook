@@ -1,0 +1,3 @@
+config:
+  guestbookapp_monitoring:isMinikube: "true"
+  guestbookapp_monitoring:grafanaAdminPassword: ChangeMe123
