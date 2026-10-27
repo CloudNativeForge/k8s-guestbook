@@ -4,15 +4,15 @@ Pulumi TypeScript program that deploys nginx (frontend), Redis with a metrics ex
 
 ## Prerequisites
 
-- Docker Desktop with Kubernetes enabled (cluster type: **kind**, managed by Docker Desktop). At least 6 GB RAM allocated to Docker (Settings → Resources); pods stay `Pending` if there is too little.
+- Docker Desktop with Kubernetes enabled (cluster type: **kind**, managed by Docker Desktop), or an Ubuntu server where you install Docker and `kind` yourself (see [Alternative setup](#alternative-setup-ubuntu-server-ec2-with-kind)). Give the cluster at least 6 GB RAM (Docker Desktop: Settings → Resources); pods stay `Pending` if there is too little.
 - `kubectl`
 - Node.js and npm
 - Pulumi CLI
 - `helm` (optional, only needed to inspect or uninstall releases manually)
 
-> **No `kind` CLI needed.** Docker Desktop creates and manages the cluster itself, so commands like `kind create cluster` are not used. Running `kind` on its own gives `zsh: command not found: kind`, which is expected and harmless here.
+> **Docker Desktop path: no `kind` CLI needed.** Docker Desktop creates and manages the cluster itself, so commands like `kind create cluster` are not used. Running `kind` on its own gives `zsh: command not found: kind`, which is expected and harmless here.
 
-### Install Pulumi
+## Install Pulumi
 
 **macOS (Homebrew):**
 
@@ -41,11 +41,101 @@ pulumi version
 
 Pulumi's TypeScript programs also need Node.js. Check it with `node --version`. The Kubernetes provider packages are installed later by `npm install`, so there is nothing else to install for Pulumi itself.
 
+## Alternative setup: Ubuntu server (EC2) with kind
+
+Use this path if you are deploying on a headless Ubuntu server (for example an AWS EC2 instance) instead of Docker Desktop. Here you install Docker, `kind` and the other tools yourself.
+
+### 1. Base packages and Docker Engine
+
+```bash
+sudo apt-get update
+sudo apt-get install -y curl git ca-certificates
+
+# Docker's convenience script: https://docs.docker.com/engine/install/ubuntu/
+curl -fsSL https://get.docker.com | sudo sh
+sudo usermod -aG docker $USER
+newgrp docker                      # or log out and back in
+docker run --rm hello-world        # should print "Hello from Docker!"
+```
+
+### 2. kubectl
+
+```bash
+# https://kubernetes.io/docs/tasks/tools/install-kubectl-linux/
+curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+sudo install -m 0755 kubectl /usr/local/bin/kubectl
+rm kubectl
+kubectl version --client
+```
+
+### 3. kind
+
+```bash
+# https://kind.sigs.k8s.io/docs/user/quick-start/ (fetches the latest release tag)
+KIND_VERSION=$(curl -s https://api.github.com/repos/kubernetes-sigs/kind/releases/latest | grep '"tag_name"' | cut -d '"' -f4)
+echo "$KIND_VERSION"               # sanity check: should look like v0.x.y
+curl -Lo ./kind "https://kind.sigs.k8s.io/dl/${KIND_VERSION}/kind-linux-amd64"
+sudo install -m 0755 kind /usr/local/bin/kind
+rm kind
+kind version
+```
+
+### 4. Raise inotify limits
+
+Recommended before running a monitoring stack on kind. The values below come from kind's known-issues page and avoid "too many open files" errors in pods (check https://kind.sigs.k8s.io/docs/user/known-issues/ if they change).
+
+```bash
+sudo sysctl fs.inotify.max_user_watches=524288
+sudo sysctl fs.inotify.max_user_instances=512
+# make it permanent:
+echo -e "fs.inotify.max_user_watches=524288\nfs.inotify.max_user_instances=512" | sudo tee /etc/sysctl.d/99-kind.conf
+```
+
+### 5. Node.js (LTS)
+
+Ubuntu's own `nodejs` package is often too old, so this uses NodeSource. If the script URL returns a 404, check https://github.com/nodesource/distributions for the current script name.
+
+```bash
+curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash -
+sudo apt-get install -y nodejs
+node --version && npm --version
+```
+
+### 6. Pulumi
+
+```bash
+# https://www.pulumi.com/docs/iac/download-install/
+curl -fsSL https://get.pulumi.com | sh
+echo 'export PATH=$PATH:$HOME/.pulumi/bin' >> ~/.bashrc
+source ~/.bashrc
+pulumi version
+```
+
+### 7. Helm (optional, only for inspecting or uninstalling releases)
+
+```bash
+# https://helm.sh/docs/intro/install/ (check this page for the current script name if Helm 4 is out)
+curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+helm version
+```
+
+## Create the cluster
+
+**Docker Desktop:** nothing to run. Enable Kubernetes in Docker Desktop's settings.
+
+**Remote server with kind installed:**
+
+```bash
+kind create cluster --name guestbook
+```
+
 ## Deploy
 
 ### 1. Point kubectl at the cluster
 
-Pulumi deploys to whichever kubectl context is currently selected, so check this first:
+Pulumi deploys to whichever kubectl context is currently selected, so check this first.
+
+**Using Docker Desktop:**
 
 ```bash
 kubectl config get-contexts
@@ -53,20 +143,57 @@ kubectl config use-context docker-desktop
 kubectl get nodes          # should show one node, Ready
 ```
 
-### 2. Get the example code
+**Using kind:**
 
-git clone https://github.com/pulumi/examples.git
-cp -r examples/kubernetes-ts-guestbook/simple ~/k8s-guestbook
-cd ~/k8s-guestbook/
-git init
+```bash
+kubectl config get-contexts
+kubectl config use-context kind-guestbook
+kubectl get nodes          # should show one node, Ready
+```
 
 ### 2. Create the Pulumi stack
 
 A **project** is the code folder (`k8s-guestbook`). A **stack** is one deployed instance of it (here, `dev`). A project with no stack cannot be deployed.
 
+First get the code. If you are using the Pulumi example, choose one of the two clone methods.
+
+**Option A: Full clone** (downloads the whole examples repo; simplest):
+
 ```bash
-cd k8s-guestbook
-ls Pulumi.yaml            # confirm you are in the project folder
+git clone https://github.com/pulumi/examples.git
+cd examples
+mkdir ~/k8s-guestbook
+cp -r kubernetes-ts-guestbook/simple/. ~/k8s-guestbook/
+cd ~/k8s-guestbook/
+git init
+```
+
+**Option B: Sparse clone** (downloads only the guestbook example folder):
+
+```bash
+git clone --depth 1 --filter=blob:none --sparse https://github.com/pulumi/examples.git
+cd examples
+git sparse-checkout set kubernetes-ts-guestbook/simple
+mkdir ~/k8s-guestbook
+cp -r kubernetes-ts-guestbook/simple/. ~/k8s-guestbook/
+cd ~/k8s-guestbook/
+git init
+```
+
+Both options copy the contents of `simple` straight into `~/k8s-guestbook`, so `Pulumi.yaml` ends up in the project root. The cloned `examples` folder is no longer needed afterwards and can be deleted.
+
+If you are using your own GitHub repo with your custom code (run this from your home directory):
+
+```bash
+git clone https://github.com/CloudNativeForge/k8s-guestbook
+cd ~/k8s-guestbook/
+git init
+```
+
+Confirm you are in the project folder:
+
+```bash
+ls Pulumi.yaml
 ```
 
 Pulumi needs a backend to store the stack's state. Pick one:
@@ -93,7 +220,7 @@ pulumi stack ls           # dev should have a * next to it
 ```
 
 - If it says the stack already exists: `pulumi stack select dev`.
-- With local state, the passphrase variable must be exported again in every new terminal. Add it to `~/.zshrc` to avoid repeating this. Pulumi Cloud does not need it.
+- With local state, the passphrase variable must be exported again in every new terminal. Add it to `~/.zshrc` (or `~/.bashrc` on Ubuntu) to avoid repeating this. Pulumi Cloud does not need it.
 
 ### 3. Set config
 
@@ -102,6 +229,10 @@ Config is stored per stack, so the stack must exist first.
 ```bash
 pulumi config set grafanaAdminPassword 'ChangeMe123'
 ```
+
+Add `--secret` to encrypt the value in the stack config.
+
+The original Pulumi Guestbook example uses an `isMinikube` setting to switch its frontend from `LoadBalancer` to `ClusterIP`. It is only needed if you use that example's frontend code, and it works on kind and Docker Desktop too despite the name. This program uses a `NodePort` frontend, so the setting is not required.
 
 ### 4. Install dependencies and deploy
 
@@ -121,7 +252,7 @@ kubectl get pods -n monitoring
 
 ## Access the services
 
-Docker Desktop's cluster has no cloud load balancer, and the NodePort is not published to your laptop. Use `kubectl port-forward` (each command keeps running, so use a separate terminal for each).
+Neither Docker Desktop nor kind has a cloud load balancer, and the NodePorts are not published to your laptop. Use `kubectl port-forward` (each command keeps running, so use a separate terminal for each).
 
 **Frontend:**
 
@@ -147,8 +278,28 @@ kubectl port-forward -n monitoring svc/monitoring-kube-prometheus-prometheus 909
 
 | Item           | URL                           |
 | -------------- | ----------------------------- |
+| Frontend       | http://localhost:8080         |
+| Grafana        | http://localhost:3000         |
 | Prometheus UI  | http://localhost:9090         |
 | Scrape targets | http://localhost:9090/targets |
+
+### On a remote server (EC2)
+
+A server has no browser, so run the port-forwards above on the server (add `&` to run each in the background), then tunnel to them from your laptop over SSH. This is safer than exposing ports publicly.
+
+```bash
+curl -s localhost:8080 | head -5      # on the server: quick check the frontend answers
+```
+
+On your laptop:
+
+```bash
+ssh -L 8080:localhost:8080 -L 3000:localhost:3000 -L 9090:localhost:9090 user@your-server
+```
+
+Then open the `localhost` URLs from the table above in your laptop's browser.
+
+> Avoid `kubectl port-forward --address 0.0.0.0` on a server with a public IP. It exposes Grafana and Prometheus to anyone who can reach that port.
 
 ### Grafana access details
 
@@ -158,7 +309,7 @@ kubectl port-forward -n monitoring svc/monitoring-kube-prometheus-prometheus 909
 | Username | `admin`                                                            |
 | Password | value of `grafanaAdminPassword` (`ChangeMe123` on the `dev` stack) |
 
-The Pulumi stack also outputs the Grafana URL and credentials:
+Read the password at any time with `pulumi config get grafanaAdminPassword`. The Pulumi stack also outputs the Grafana URL and credentials:
 
 ```bash
 pulumi stack output
@@ -195,18 +346,19 @@ If the target is missing or DOWN, see "Troubleshooting" below.
 
 ## Troubleshooting
 
-| Symptom                                       | Cause and fix                                                                                                                                                                                                                                                                                                                                                                                    |
-| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `zsh: command not found: kind`                | The `kind` CLI is not installed and is not needed with Docker Desktop's Kubernetes. Skip any `kind` commands.                                                                                                                                                                                                                                                                                    |
-| `no Pulumi.yaml found`                        | You are not in the project folder. `cd k8s-guestbook`.                                                                                                                                                                                                                                                                                                                                           |
-| Project exists but `pulumi stack ls` is empty | Run `pulumi stack init dev`.                                                                                                                                                                                                                                                                                                                                                                     |
-| Passphrase prompt on every Pulumi command     | `export PULUMI_CONFIG_PASSPHRASE=""` (see Deploy, step 2).                                                                                                                                                                                                                                                                                                                                       |
-| `services "..." not found`                    | Either the app is not deployed (`pulumi up`), kubectl is on the wrong context (`kubectl config use-context docker-desktop`), or Pulumi autonaming added a random suffix. Run `kubectl get svc` (and `kubectl get svc -n monitoring`) to see the real names, and set `metadata.name` (or `name:` on the Helm release) explicitly. Search all namespaces with `kubectl get svc -A \| grep <name>`. |
-| Pods stuck `Pending`                          | Raise Docker Desktop memory to 6 GB or more (Settings → Resources).                                                                                                                                                                                                                                                                                                                              |
-| ServiceMonitor creation fails                 | The Helm release has not finished installing, so the CRD does not exist yet. Make sure the ServiceMonitor has `dependsOn: [monitoring]`.                                                                                                                                                                                                                                                         |
-| Target missing in Prometheus                  | The ServiceMonitor `matchLabels`, port name, or namespace does not match the Service. Check with `kubectl get svc redis-leader --show-labels`.                                                                                                                                                                                                                                                   |
-| `localhost:3000` not reachable                | The Grafana port-forward is not running.                                                                                                                                                                                                                                                                                                                                                         |
-| `pulumi up` hangs on a Service                | A `LoadBalancer` Service never gets an external IP on a local cluster. Use `NodePort` or `ClusterIP`.                                                                                                                                                                                                                                                                                            |
+| Symptom | Cause and fix |
+| --- | --- |
+| `zsh: command not found: kind` | The `kind` CLI is not installed. It is not needed with Docker Desktop's Kubernetes, so skip any `kind` commands. On an Ubuntu server, follow the [kind install step](#3-kind). |
+| `no Pulumi.yaml found` | You are not in the project folder. `cd ~/k8s-guestbook`. |
+| Project exists but `pulumi stack ls` is empty | `pulumi new` creates the project but no stack. Log in to a backend, then run `pulumi stack init dev` (or `pulumi stack select dev` if it already exists). |
+| Passphrase prompt on every Pulumi command | `export PULUMI_CONFIG_PASSPHRASE=""` (see Deploy, step 2). |
+| `services "..." not found` | Either the app is not deployed (`pulumi up`), kubectl is on the wrong context (`kubectl config use-context docker-desktop` or `kind-guestbook`), or Pulumi autonaming added a random suffix. Run `kubectl get svc` (and `kubectl get svc -n monitoring`) to see the real names, and set `metadata.name` (or `name:` on the Helm release) explicitly. Search all namespaces with `kubectl get svc -A \| grep <name>`. |
+| Pods stuck `Pending` | Raise Docker Desktop memory to 6 GB or more (Settings → Resources). On a server, use at least 4 vCPU and 16 GB RAM. |
+| Pods fail with "too many open files" | Raise the inotify limits (Ubuntu setup, step 4). |
+| ServiceMonitor creation fails | The Helm release has not finished installing, so the CRD does not exist yet. Make sure the ServiceMonitor has `dependsOn: [monitoring]`. |
+| Target missing in Prometheus | The ServiceMonitor `matchLabels`, port name, or namespace does not match the Service. Check with `kubectl get svc redis-leader --show-labels`. |
+| `localhost:3000` not reachable | The Grafana port-forward is not running (and, on a server, the SSH tunnel must be open too). |
+| `pulumi up` hangs on a Service | A `LoadBalancer` Service never gets an external IP on a local cluster. Use `NodePort` or `ClusterIP`. |
 
 ## Issues we hit
 
@@ -216,9 +368,9 @@ The frontend Service was pasted inside the nginx Deployment constructor. `fronte
 
 **Fix:** Close the Deployment, define `frontendLabels`, and declare the Service as its own resource with `metadata.name: "frontend"`.
 
-### 2. `kubectl port-forward svc/frontend 8080:80` — Service not found
+### 2. `kubectl port-forward svc/frontend 8080:80`: Service not found
 
-Pulumi’s first `up` only created the nginx Deployment. There was no Service named `frontend` (only `kubernetes` in `default`). Port-forward failed with `services "frontend" not found`.
+Pulumi's first `up` only created the nginx Deployment. There was no Service named `frontend` (only `kubernetes` in `default`). Port-forward failed with `services "frontend" not found`.
 
 **Fix:** Create a NodePort Service named `frontend` whose selector matches the nginx pod labels (`app: nginx`).
 
@@ -255,15 +407,9 @@ Result: a single deployed release named `monitoring`, with predictable Service n
 
 ### 5. Grafana URL vs NodePort
 
-The stack exports `grafanaUrl = "http://localhost:3000"`, but Grafana is a NodePort on **30300**. `localhost:3000` only works with a port-forward:
+The stack exports `grafanaUrl = "http://localhost:3000"`, but Grafana is a NodePort on **30300**. `localhost:3000` only works with the port-forward described in "Access the services".
 
-```bash
-kubectl port-forward -n monitoring svc/monitoring-grafana 3000:80
-```
-
-Login: `admin` / value of `grafanaAdminPassword` (`ChangeMe123` on the `dev` stack).
-
-This is because the cluster is Docker Desktop's kind-type Kubernetes, not a cluster created with the `kind` CLI. A kind `extraPortMappings` entry (30300 → 3000) can only be set when a cluster is created with `kind create cluster --config`, which Docker Desktop does not allow.
+Docker Desktop's Kubernetes is kind-type but is not a cluster created with the `kind` CLI. A kind `extraPortMappings` entry (30300 → 3000) can only be set when a cluster is created with `kind create cluster --config`, which Docker Desktop does not allow.
 
 ### 6. Redis ServiceMonitor must match Service labels and namespaces
 
@@ -275,18 +421,6 @@ Prometheus lives in `monitoring`. Redis is in `default`. A ServiceMonitor in `mo
 - It depends on the Helm release so the ServiceMonitor CRD exists first
 - Prometheus is configured with `serviceMonitorSelectorNilUsesHelmValues: false`, so it also picks up ServiceMonitors that lack the Helm release label
 
-### 7. Project created but no stack
-
-`pulumi new` created the project (`k8s-guestbook`) but no `dev` stack, so config and `pulumi up` had nothing to attach to.
-
-**Fix:** log in to a backend (`pulumi login` for Pulumi Cloud, or `pulumi login --local` plus `PULUMI_CONFIG_PASSPHRASE` for local state), then `pulumi stack init dev` (or `pulumi stack select dev` if it already exists).
-
-### 8. `kind` command not found
-
-The cluster shown in Docker Desktop (Kubernetes → cluster type: kind) is managed by Docker Desktop itself, so the standalone `kind` CLI is not installed and not needed.
-
-**Fix:** Skip `kind` commands. Select the context with `kubectl config use-context docker-desktop` and use `kubectl port-forward` to reach services.
-
 ## Current layout
 
 | Resource             | Name               | Notes                           |
@@ -297,17 +431,15 @@ The cluster shown in Docker Desktop (Kubernetes → cluster type: kind) is manag
 | Helm release         | `monitoring`       | Grafana NodePort 30300          |
 | ServiceMonitor       | `redis-leader`     | scrapes `default` Redis metrics |
 
-## Config
-
-```bash
-pulumi config set grafanaAdminPassword 'ChangeMe123'
-```
-
-The original Pulumi Guestbook example uses an `isMinikube` setting to switch its frontend from `LoadBalancer` to `ClusterIP`. It is only needed if you use that example's frontend code, and it works on kind and Docker Desktop too despite the name. This program uses a `NodePort` frontend, so the setting is not required.
-
 ## Clean up
 
 ```bash
 pulumi destroy --yes
 pulumi stack rm dev       # optional: removes the stack itself
+```
+
+If you created the cluster with the `kind` CLI (Ubuntu server), delete it as well:
+
+```bash
+kind delete cluster --name guestbook
 ```
