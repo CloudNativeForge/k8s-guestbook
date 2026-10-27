@@ -4,7 +4,7 @@ Pulumi TypeScript program that deploys nginx (frontend), Redis with a metrics ex
 
 ## Prerequisites
 
-- Docker Desktop with Kubernetes enabled (cluster type: **kind**, managed by Docker Desktop). At least 4 GB RAM allocated to Docker (Settings → Resources); pods stay `Pending` if there is too little.
+- Docker Desktop with Kubernetes enabled (cluster type: **kind**, managed by Docker Desktop). At least 6 GB RAM allocated to Docker (Settings → Resources); pods stay `Pending` if there is too little.
 - `kubectl`
 - Node.js and npm
 - Pulumi CLI
@@ -52,6 +52,13 @@ kubectl config get-contexts
 kubectl config use-context docker-desktop
 kubectl get nodes          # should show one node, Ready
 ```
+
+### 2. Get the example code
+
+git clone https://github.com/pulumi/examples.git
+cp -r examples/kubernetes-ts-guestbook/simple ~/k8s-guestbook
+cd ~/k8s-guestbook/
+git init
 
 ### 2. Create the Pulumi stack
 
@@ -138,17 +145,17 @@ kubectl port-forward -n monitoring svc/monitoring-kube-prometheus-prometheus 909
 # scrape targets page: http://localhost:9090/targets
 ```
 
-| Item | URL |
-|---|---|
-| Prometheus UI | http://localhost:9090 |
+| Item           | URL                           |
+| -------------- | ----------------------------- |
+| Prometheus UI  | http://localhost:9090         |
 | Scrape targets | http://localhost:9090/targets |
 
 ### Grafana access details
 
-| Item | Value |
-|---|---|
-| URL | http://localhost:3000 (requires the Grafana port-forward above) |
-| Username | `admin` |
+| Item     | Value                                                              |
+| -------- | ------------------------------------------------------------------ |
+| URL      | http://localhost:3000 (requires the Grafana port-forward above)    |
+| Username | `admin`                                                            |
 | Password | value of `grafanaAdminPassword` (`ChangeMe123` on the `dev` stack) |
 
 The Pulumi stack also outputs the Grafana URL and credentials:
@@ -163,13 +170,13 @@ pulumi stack output
 2. Find `serviceMonitor/monitoring/redis-leader`. It should show **UP**.
 3. On the **Graph** page, run these queries:
 
-| Query | What it shows |
-|---|---|
-| `redis_up` | `1` means the exporter can reach Redis |
-| `redis_commands_processed_total` | Backend (Redis) request counter |
-| `rate(redis_commands_processed_total[1m])` | Redis commands per second |
-| `container_memory_working_set_bytes{pod=~"nginx.*"}` | Frontend memory usage |
-| `rate(container_cpu_usage_seconds_total{pod=~"nginx.*"}[1m])` | Frontend CPU usage |
+| Query                                                         | What it shows                          |
+| ------------------------------------------------------------- | -------------------------------------- |
+| `redis_up`                                                    | `1` means the exporter can reach Redis |
+| `redis_commands_processed_total`                              | Backend (Redis) request counter        |
+| `rate(redis_commands_processed_total[1m])`                    | Redis commands per second              |
+| `container_memory_working_set_bytes{pod=~"nginx.*"}`          | Frontend memory usage                  |
+| `rate(container_cpu_usage_seconds_total{pod=~"nginx.*"}[1m])` | Frontend CPU usage                     |
 
 If the target is missing or DOWN, see "Troubleshooting" below.
 
@@ -188,18 +195,18 @@ If the target is missing or DOWN, see "Troubleshooting" below.
 
 ## Troubleshooting
 
-| Symptom | Cause and fix |
-|---|---|
-| `zsh: command not found: kind` | The `kind` CLI is not installed and is not needed with Docker Desktop's Kubernetes. Skip any `kind` commands. |
-| `no Pulumi.yaml found` | You are not in the project folder. `cd k8s-guestbook`. |
-| Project exists but `pulumi stack ls` is empty | Run `pulumi stack init dev`. |
-| Passphrase prompt on every Pulumi command | `export PULUMI_CONFIG_PASSPHRASE=""` (see Deploy, step 2). |
-| `services "..." not found` | Either the app is not deployed (`pulumi up`), kubectl is on the wrong context (`kubectl config use-context docker-desktop`), or Pulumi autonaming added a random suffix. Run `kubectl get svc` (and `kubectl get svc -n monitoring`) to see the real names, and set `metadata.name` (or `name:` on the Helm release) explicitly. Search all namespaces with `kubectl get svc -A \| grep <name>`. |
-| Pods stuck `Pending` | Raise Docker Desktop memory to 6 GB or more (Settings → Resources). |
-| ServiceMonitor creation fails | The Helm release has not finished installing, so the CRD does not exist yet. Make sure the ServiceMonitor has `dependsOn: [monitoring]`. |
-| Target missing in Prometheus | The ServiceMonitor `matchLabels`, port name, or namespace does not match the Service. Check with `kubectl get svc redis-leader --show-labels`. |
-| `localhost:3000` not reachable | The Grafana port-forward is not running. |
-| `pulumi up` hangs on a Service | A `LoadBalancer` Service never gets an external IP on a local cluster. Use `NodePort` or `ClusterIP`. |
+| Symptom                                       | Cause and fix                                                                                                                                                                                                                                                                                                                                                                                    |
+| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `zsh: command not found: kind`                | The `kind` CLI is not installed and is not needed with Docker Desktop's Kubernetes. Skip any `kind` commands.                                                                                                                                                                                                                                                                                    |
+| `no Pulumi.yaml found`                        | You are not in the project folder. `cd k8s-guestbook`.                                                                                                                                                                                                                                                                                                                                           |
+| Project exists but `pulumi stack ls` is empty | Run `pulumi stack init dev`.                                                                                                                                                                                                                                                                                                                                                                     |
+| Passphrase prompt on every Pulumi command     | `export PULUMI_CONFIG_PASSPHRASE=""` (see Deploy, step 2).                                                                                                                                                                                                                                                                                                                                       |
+| `services "..." not found`                    | Either the app is not deployed (`pulumi up`), kubectl is on the wrong context (`kubectl config use-context docker-desktop`), or Pulumi autonaming added a random suffix. Run `kubectl get svc` (and `kubectl get svc -n monitoring`) to see the real names, and set `metadata.name` (or `name:` on the Helm release) explicitly. Search all namespaces with `kubectl get svc -A \| grep <name>`. |
+| Pods stuck `Pending`                          | Raise Docker Desktop memory to 6 GB or more (Settings → Resources).                                                                                                                                                                                                                                                                                                                              |
+| ServiceMonitor creation fails                 | The Helm release has not finished installing, so the CRD does not exist yet. Make sure the ServiceMonitor has `dependsOn: [monitoring]`.                                                                                                                                                                                                                                                         |
+| Target missing in Prometheus                  | The ServiceMonitor `matchLabels`, port name, or namespace does not match the Service. Check with `kubectl get svc redis-leader --show-labels`.                                                                                                                                                                                                                                                   |
+| `localhost:3000` not reachable                | The Grafana port-forward is not running.                                                                                                                                                                                                                                                                                                                                                         |
+| `pulumi up` hangs on a Service                | A `LoadBalancer` Service never gets an external IP on a local cluster. Use `NodePort` or `ClusterIP`.                                                                                                                                                                                                                                                                                            |
 
 ## Issues we hit
 
@@ -282,13 +289,13 @@ The cluster shown in Docker Desktop (Kubernetes → cluster type: kind) is manag
 
 ## Current layout
 
-| Resource | Name | Notes |
-|---|---|---|
-| Deployment + Service | nginx / `frontend` | NodePort 80 |
-| Deployment + Service | `redis-leader` | Redis 6379 + exporter 9121 |
-| Namespace | `monitoring` | kube-prometheus-stack |
-| Helm release | `monitoring` | Grafana NodePort 30300 |
-| ServiceMonitor | `redis-leader` | scrapes `default` Redis metrics |
+| Resource             | Name               | Notes                           |
+| -------------------- | ------------------ | ------------------------------- |
+| Deployment + Service | nginx / `frontend` | NodePort 80                     |
+| Deployment + Service | `redis-leader`     | Redis 6379 + exporter 9121      |
+| Namespace            | `monitoring`       | kube-prometheus-stack           |
+| Helm release         | `monitoring`       | Grafana NodePort 30300          |
+| ServiceMonitor       | `redis-leader`     | scrapes `default` Redis metrics |
 
 ## Config
 
