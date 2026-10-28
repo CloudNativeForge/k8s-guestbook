@@ -146,7 +146,7 @@ kubectl get nodes          # should show one node, Ready
 **Using kind:**
 
 ```bash
-kubectl config get-contexts
+kind create cluster --name guestbook
 kubectl config use-context kind-guestbook
 kubectl get nodes          # should show one node, Ready
 ```
@@ -155,34 +155,7 @@ kubectl get nodes          # should show one node, Ready
 
 A **project** is the code folder (`k8s-guestbook`). A **stack** is one deployed instance of it (here, `dev`). A project with no stack cannot be deployed.
 
-First get the code. If you are using the Pulumi example, choose one of the two clone methods.
-
-**Option A: Full clone** (downloads the whole examples repo; simplest):
-
-```bash
-git clone https://github.com/pulumi/examples.git
-cd examples
-mkdir ~/k8s-guestbook
-cp -r kubernetes-ts-guestbook/simple/. ~/k8s-guestbook/
-cd ~/k8s-guestbook/
-git init
-```
-
-**Option B: Sparse clone** (downloads only the guestbook example folder):
-
-```bash
-git clone --depth 1 --filter=blob:none --sparse https://github.com/pulumi/examples.git
-cd examples
-git sparse-checkout set kubernetes-ts-guestbook/simple
-mkdir ~/k8s-guestbook
-cp -r kubernetes-ts-guestbook/simple/. ~/k8s-guestbook/
-cd ~/k8s-guestbook/
-git init
-```
-
-Both options copy the contents of `simple` straight into `~/k8s-guestbook`, so `Pulumi.yaml` ends up in the project root. The cloned `examples` folder is no longer needed afterwards and can be deleted.
-
-If you are using your own GitHub repo with your custom code (run this from your home directory):
+First get the code. 
 
 ```bash
 git clone https://github.com/CloudNativeForge/k8s-guestbook
